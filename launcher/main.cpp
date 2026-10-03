@@ -174,9 +174,10 @@ int run() {
 int main() {
     SetConsoleOutputCP(CP_UTF8);
     const int code = run();
-    // 탐색기에서 더블클릭했으면 이 창은 우리만의 것이다 — 결과를 읽기 전에 닫히지 않게 기다린다
+    // 성공하면 곧바로 닫는다 — 게임 옆에 뜬 콘솔 창이 곧 성공의 표시다. 실패했고 탐색기에서 더블클릭했으면
+    // 이 창은 우리만의 것이라, 이유를 읽기 전에 닫히지 않게 기다린다.
     DWORD processes[2];
-    if (GetConsoleProcessList(processes, 2) == 1) {
+    if (code != 0 && GetConsoleProcessList(processes, 2) == 1) {
         std::printf("\n아무 키나 누르면 닫힙니다...");
         _getch();
     }
