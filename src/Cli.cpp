@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <format>
+#include <functional>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -17,29 +18,12 @@ namespace cb::cli {
 namespace {
 
 using blocker::Config;
+using blocker::kSwitches;
+using blocker::SwitchDef;
 
 HANDLE g_in = INVALID_HANDLE_VALUE;
 HANDLE g_out = INVALID_HANDLE_VALUE;
 bool g_allocated = false;
-
-// 스위치 — status 에 이 차례로 보인다(웹소켓이 맨 아래). parent 가 꺼져 있으면 하위 스위치는 뜻이 없다.
-struct SwitchDef {
-    const char* name;
-    bool Config::*field;
-    bool Config::*parent;
-    const char* label;
-};
-constexpr SwitchDef kSwitches[] = {
-    {"players", &Config::players, nullptr, "플레이어 막기 (호스트 포함)"},
-    {"allowhost", &Config::allowHost, &Config::players, "호스트 허용 — 내가 친 명령은 실행"},
-    {"allplayers", &Config::allPlayers, &Config::players, "모든 명령 막기"},
-    {"commandblocks", &Config::commandBlocks, nullptr, "명령 블록 막기 (명령 블록 수레 포함)"},
-    {"allcommandblocks", &Config::allCommandBlocks, &Config::commandBlocks, "모든 명령 막기"},
-    {"npcs", &Config::npcs, nullptr, "NPC 막기 (버튼 · 대화창의 명령)"},
-    {"allnpcs", &Config::allNpcs, &Config::npcs, "모든 명령 막기"},
-    {"websockets", &Config::websockets, nullptr, "웹소켓 막기 (/connect 로 붙은 서버)"},
-    {"allwebsockets", &Config::allWebsockets, &Config::websockets, "모든 명령 막기"},
-};
 
 // 콘솔 창의 닫기는 게임 프로세스를 통째로 끝낸다 — Ctrl+C · Ctrl+Break 만이라도 삼킨다.
 BOOL WINAPI onCtrl(DWORD type) { return type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT; }
@@ -58,6 +42,18 @@ void println(std::string_view text = {}) {
     print("\n");
 }
 
+std::string toUtf8(std::wstring_view text) {
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    std::string out(static_cast<std::size_t>(bytes), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), bytes, nullptr, nullptr);
+    return out;
+}
+
+// 바꾸고 곧바로 맞추고 저장한다 — 저장에 실패하면 알린다(바꾼 것은 이번 실행 동안 그대로 쓴다)
+void change(const std::function<void(Config&)>& fn) {
+    if (!blocker::edit(fn)) println("※ 설정 파일에 저장하지 못했습니다 — DLL 이 있는 폴더에 쓸 수 있는지 확인하세요");
+}
+
 // false = 콘솔을 더 읽을 수 없다. Ctrl+C 가 읽기를 끊으면 빈 줄로 돌려준다.
 bool readLine(std::string& out) {
     std::wstring line;
@@ -72,9 +68,7 @@ bool readLine(std::string& out) {
         line.append(buf, n);
     }
     while (!line.empty() && (line.back() == L'\n' || line.back() == L'\r')) line.pop_back();
-    const int bytes = WideCharToMultiByte(CP_UTF8, 0, line.data(), static_cast<int>(line.size()), nullptr, 0, nullptr, nullptr);
-    out.assign(static_cast<std::size_t>(bytes), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, line.data(), static_cast<int>(line.size()), out.data(), bytes, nullptr, nullptr);
+    out = toUtf8(line);
     return true;
 }
 
@@ -146,9 +140,10 @@ void addCommand(const std::vector<std::string>& args) {
     const std::string name = args.size() >= 2 ? gate::normalizeName(args[1]) : std::string();
     if (name.empty()) return println("사용법: add <명령>   예) add give");
     if (name.size() > blocker::kMaxLength) return println("명령 이름이 너무 깁니다");
+    if (name.find(',') != std::string::npos) return println("명령 이름에 쉼표(,)는 쓸 수 없습니다");   // 설정 파일의 구분자
     const char* problem = nullptr;
     int index = -1;
-    blocker::edit([&](Config& c) {
+    change([&](Config& c) {
         if (std::find(c.commands.begin(), c.commands.end(), name) != c.commands.end()) {
             problem = "이미 목록에 있습니다";
         } else if (c.commands.size() >= blocker::kMaxCommands) {
@@ -173,7 +168,7 @@ void deleteCommand(const std::vector<std::string>& args) {
                           std::all_of(arg.begin(), arg.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; });
     const std::string name = gate::normalizeName(arg);
     std::string removed;
-    blocker::edit([&](Config& c) {
+    change([&](Config& c) {
         auto it = c.commands.end();
         if (isNumber) {
             const std::size_t n = std::stoul(arg);
@@ -197,7 +192,7 @@ void setSwitch(const std::vector<std::string>& args) {
     if (def == std::end(kSwitches)) return println("모르는 스위치입니다: " + args[1]);
     if (value != "on" && value != "off") return println("값은 on 또는 off 입니다");
     bool parentOff = false;
-    blocker::edit([&](Config& c) {
+    change([&](Config& c) {
         c.*(def->field) = value == "on";
         parentOff = def->parent != nullptr && !(c.*(def->parent));
     });
@@ -232,11 +227,12 @@ void close() {
     g_allocated = false;
 }
 
-void run(bool started, const std::string& startError) {
+void run(bool started, const std::string& startError, const std::wstring& settingsPath) {
     println("Command Blocker — Minecraft Bedrock 1.26.5203.0");
     println("내가 호스트인 월드(로컬 · 친구가 들어온 월드)에서 고른 명령을 조용히 무시합니다.");
     println("※ 이 창을 닫으면 게임도 함께 꺼집니다 — 내릴 때는 unload 를 입력하세요.");
     if (started) {
+        println("설정 파일: " + toUtf8(settingsPath));
         println("준비됨 — help 를 입력하면 명령어가 나옵니다.");
     } else {
         println("시작하지 못했습니다: " + startError);
@@ -257,14 +253,14 @@ void run(bool started, const std::string& startError) {
         } else if (cmd == "status") {
             printStatus();
         } else if (cmd == "on" || cmd == "off") {
-            blocker::edit([&](Config& c) { c.enabled = cmd == "on"; });
+            change([&](Config& c) { c.enabled = cmd == "on"; });
             println(cmd == "on" ? "차단 켜짐" : "차단 꺼짐 — 모든 명령이 그대로 실행됩니다");
         } else if (cmd == "add") {
             addCommand(args);
         } else if (cmd == "del") {
             deleteCommand(args);
         } else if (cmd == "clear") {
-            blocker::edit([](Config& c) { c.commands.clear(); });
+            change([](Config& c) { c.commands.clear(); });
             println("막을 명령을 모두 지웠습니다");
         } else if (cmd == "set") {
             setSwitch(args);

@@ -3,10 +3,12 @@
 #include "Blocker.h"
 #include "CommandGate.h"
 #include "Offsets.h"
+#include "Settings.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
@@ -202,6 +204,46 @@ void testBoard() {
     CHECK(board.read(out) && gate::sameList(in, out));
 }
 
+void testSettings() {
+    blocker::Config c;
+    c.enabled = false;
+    c.commands = {"give", "tp"};
+    c.allowHost = true;
+    c.npcs = false;
+    c.allWebsockets = true;
+    blocker::Config back;
+    settings::fromIni(settings::toIni(c), back);
+    CHECK(!back.enabled);
+    CHECK(back.commands == c.commands);
+    for (const blocker::SwitchDef& s : blocker::kSwitches) CHECK(back.*(s.field) == c.*(s.field));
+
+    // 손으로 고친 파일 — BOM · 대소문자 · 공백 · 중복 · 빈 칸 · 모르는 칸 · 잘못된 값
+    blocker::Config hand;
+    settings::fromIni("\xEF\xBB\xBF; note\r\n[CommandBlocker]\r\nEnabled = OFF\r\ncommands = /Give, TP ,give,, kill\r\n"
+                      "players=maybe\r\nunknown=1\r\nnpcs=0\n",
+                      hand);
+    CHECK(!hand.enabled);
+    CHECK((hand.commands == std::vector<std::string>{"give", "tp", "kill"}));
+    CHECK(hand.players);   // 잘못된 값은 그대로(기본 on)
+    CHECK(!hand.npcs);
+
+    std::string many = "commands=";
+    for (int i = 0; i < 30; ++i) many += "c" + std::to_string(i) + ",";
+    blocker::Config capped;
+    settings::fromIni(many, capped);
+    CHECK(capped.commands.size() == static_cast<std::size_t>(blocker::kMaxCommands));
+
+    // 파일로 — 쓰고 다시 읽기, 없는 파일
+    const std::wstring path = (std::filesystem::temp_directory_path() / L"cb_tests.ini").wstring();
+    CHECK(settings::save(path, c));
+    blocker::Config loaded;
+    CHECK(settings::load(path, loaded));
+    CHECK(!loaded.enabled && loaded.commands == c.commands && loaded.allowHost);
+    std::filesystem::remove(path);
+    CHECK(!settings::load(path, loaded));
+    CHECK(!settings::save(L"", c));
+}
+
 } // namespace
 
 int main() {
@@ -212,6 +254,7 @@ int main() {
     testIgnores();
     testBits();
     testBoard();
+    testSettings();
     if (g_failed == 0) std::printf("all tests passed\n");
     return g_failed == 0 ? 0 : 1;
 }

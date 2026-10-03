@@ -17,9 +17,10 @@ UI 프레임워크 없이, 게임 프로세스에 붙는 콘솔 창에서 명령
 
 ## 사용법
 
-1. 게임을 실행합니다.
-2. `CommandBlocker.exe` 를 실행합니다 — 게임에 DLL 을 넣고, 게임 옆에 콘솔 창이 뜹니다.
-3. 콘솔에서 명령어를 입력합니다.
+1. [Releases](https://github.com/Lukky7XD/command-blocker/releases) 의 zip 을 한 폴더에 풉니다.
+2. 게임을 실행합니다.
+3. `CommandBlocker.exe` 를 실행합니다 — 같은 폴더의 `command_blocker.dll` 을 게임에 넣고, 성공하면 런처 창은 닫히고 게임 옆에 콘솔 창이 뜹니다.
+4. 콘솔에서 명령어를 입력합니다.
 
 ```
 status                  상태 · 스위치 · 막을 명령 목록 · 무시한 횟수
@@ -41,12 +42,30 @@ add tp
 set allowhost on
 ```
 
+### 설정 파일
+
+설정은 `command_blocker.dll` 옆의 **`command_blocker.ini`** 에 저장됩니다 — 콘솔에서 바꿀 때마다 저장되고, 다음에 넣으면 그대로 불러옵니다.
+직접 고쳐도 됩니다(게임에 넣기 전에).
+
+```ini
+[CommandBlocker]
+enabled=on
+commands=give,tp
+players=on
+allowhost=on
+allplayers=off
+commandblocks=on
+...
+```
+
+`CommandBlocker.exe` 만 따로 쓰면(옆에 DLL 이 없으면) 박힌 DLL 을 `%LOCALAPPDATA%\CommandBlocker` 에 꺼내 넣으므로 설정 파일도 그 폴더에 생깁니다.
+
 ### 주의
 
 - **콘솔 창을 닫으면 게임도 함께 꺼집니다.** 콘솔이 게임 프로세스의 것이기 때문입니다 — 내릴 때는 `unload` 를 입력하세요.
 - 남의 월드 · 외부 서버 · Realms 에서는 동작하지 않습니다(명령이 내 게임에서 실행되지 않습니다).
 - `help` 처럼 각자의 게임에서 도는 명령은 막을 수 없습니다.
-- 설정은 저장되지 않습니다 — 다시 넣으면 새로 입력해야 합니다.
+- 서명되지 않은 exe 라 처음 실행할 때 Windows SmartScreen 경고가 뜰 수 있습니다 — 「추가 정보 → 실행」.
 
 ## 동작 원리
 
@@ -69,9 +88,11 @@ cmake --build build --config Release
 
 | 산출물 | 설명 |
 |---|---|
-| `build/Release/CommandBlocker.exe` | 런처 — DLL 이 박혀 있어 이것 하나만 있으면 됩니다 |
+| `build/Release/CommandBlocker.exe` | 런처 — 옆에 DLL 이 있으면 그것을, 없으면 박힌 DLL 을 넣습니다 |
 | `build/Release/command_blocker.dll` | 차단기 본체 (다른 인젝터로 넣어도 됩니다) |
 | `build/Release/cb_tests.exe` | 게임 없이 도는 시험 — **Release 로 빌드해야** MSVC `std::map` 배치가 게임과 같습니다 |
+
+`build/Release` 의 런처로 넣으면 바로 옆의 DLL 이 게임에 물려 잠기므로, 다시 빌드하기 전에 콘솔에서 `unload` 하세요.
 
 ## 라이선스
 

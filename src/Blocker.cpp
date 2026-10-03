@@ -4,6 +4,7 @@
 #include "CommandHook.h"
 #include "Game.h"
 #include "Hook.h"
+#include "Settings.h"
 
 #include <windows.h>
 
@@ -16,9 +17,10 @@ namespace {
 
 constexpr auto kInterval = std::chrono::milliseconds(500);   // 게임 메모리를 걸으므로 프레임마다 하지 않는다
 
-std::mutex g_mutex;   // 아래 셋과 맞추기
+std::mutex g_mutex;   // 아래 넷과 맞추기
 Config g_config;
 Status g_status;
+std::wstring g_settingsPath;
 bool g_stopping = false;
 std::condition_variable g_wake;
 // std::thread 가 아니다 — 게임이 끝날 때 DLL 의 정적 소멸자가 joinable 한 std::thread 를 만나면 terminate 한다.
@@ -84,7 +86,7 @@ Bits toBits(const Config& c) {
     return b;
 }
 
-bool start(std::string& error) {
+bool start(const std::wstring& settingsPath, std::string& error) {
     std::uint8_t* base = game::verifiedBase(error);
     if (!base || !hook::init(error)) return false;
     if (!game::installRootHook(base, error) || !cmdrun::install(base, error)) {
@@ -92,6 +94,12 @@ bool start(std::string& error) {
         game::removeRootHook();
         hook::shutdown();
         return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_settingsPath = settingsPath;
+        settings::load(g_settingsPath, g_config);
+        settings::save(g_settingsPath, g_config);   // 없으면 만들어 둔다 — 어디 있는지 보이게
     }
     g_stopping = false;
     g_ticker = CreateThread(nullptr, 0, &tickerMain, nullptr, 0, nullptr);
@@ -119,10 +127,11 @@ Config config() {
     return g_config;
 }
 
-void edit(const std::function<void(Config&)>& change) {
+bool edit(const std::function<void(Config&)>& change) {
     std::lock_guard<std::mutex> lock(g_mutex);
     change(g_config);
     applyLocked();
+    return settings::save(g_settingsPath, g_config);
 }
 
 Status status() {

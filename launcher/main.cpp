@@ -1,6 +1,7 @@
 // CommandBlocker.exe — 실행 중인 게임에 command_blocker.dll 을 넣는 런처(Kaldrin.exe 의 기본 동작과 같다).
 //
-// 산출물은 exe 하나다. DLL 은 RCDATA 101 로 박혀 있다 — 게임 쪽 LoadLibraryW 는 파일 경로가 필요하므로
+// exe 옆에 command_blocker.dll 이 있으면(배포 zip) 그것을 넣는다 — 설정 파일(command_blocker.ini)이 DLL 옆에 생기므로
+// zip 을 푼 폴더에 함께 남는다. 없으면 RCDATA 101 로 박힌 DLL 을 쓴다 — 게임 쪽 LoadLibraryW 는 파일 경로가 필요하므로
 // `%LOCALAPPDATA%\CommandBlocker` 에 꺼내 놓고 그 경로를 넣는다. 게임은 풀트러스트 데스크톱 앱이라 ACL 부여도 관리자 권한도 필요 없다.
 
 #include <windows.h>
@@ -59,6 +60,18 @@ bool sameContent(const std::wstring& path, const void* data, DWORD size) {
     }
     CloseHandle(h);
     return same;
+}
+
+// exe 옆의 command_blocker.dll — 없으면 빈 문자열
+std::wstring dllBesideExe() {
+    wchar_t buf[MAX_PATH]{};
+    const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return {};
+    std::wstring path(buf, n);
+    path.resize(path.find_last_of(L"\\/") + 1);
+    path += kModule;
+    const DWORD attr = GetFileAttributesW(path.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY) ? path : std::wstring();
 }
 
 // 박힌 DLL 을 꺼내 그 경로를 준다. 실패하면 빈 문자열과 error.
@@ -142,7 +155,8 @@ bool inject(DWORD pid, const std::wstring& dllPath, std::string& error) {
 
 int run() {
     std::string error;
-    const std::wstring dll = extractDll(error);
+    std::wstring dll = dllBesideExe();
+    if (dll.empty()) dll = extractDll(error);
     if (dll.empty()) {
         std::printf("실패: %s\n", error.c_str());
         return 1;

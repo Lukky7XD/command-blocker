@@ -24,7 +24,8 @@ add_library(cb_core STATIC
     src/CommandHook.cpp
     src/Game.cpp
     src/Hook.cpp
-    src/Memory.cpp)
+    src/Memory.cpp
+    src/Settings.cpp)
 target_include_directories(cb_core PUBLIC src)
 target_compile_options(cb_core PUBLIC /utf-8 /W4 /permissive-)
 target_compile_definitions(cb_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
